@@ -7,178 +7,151 @@ class Api extends CI_Controller
     {
         parent::__construct();
         $this->load->model('User_model');
-        header('Content-Type: application/json');
+        $this->load->helper(['url', 'form']);
+        $this->load->library('upload');
 
-        // Optional CORS headers
+        // CORS
         header("Access-Control-Allow-Origin: *");
         header("Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS");
         header("Access-Control-Allow-Headers: Content-Type, Content-Length, Accept-Encoding");
-    }
+        header('Content-Type: application/json');
 
-    // GET: /api/users or /api/users/{id}
-    public function users($id = null)
-    {
-        if ($_SERVER['REQUEST_METHOD'] === 'GET') {
-            $data = $id ? $this->User_model->get_users($id) : $this->User_model->get_users();
-            echo json_encode($data ?: ['message' => 'User not found']);
+        // Handle CORS preflight
+        if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+            exit(0);
         }
     }
 
-    // POST: /api/create_user
+    public function users($id = null)
+    {
+        if ($_SERVER['REQUEST_METHOD'] !== 'GET') {
+            echo json_encode(['status' => false, 'message' => 'Invalid request method. Use GET.']);
+            return;
+        }
+
+        $data = $this->User_model->get_users($id);
+        echo json_encode($data ?: ['status' => false, 'message' => 'User not found']);
+    }
+
     public function create_user()
     {
-        if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-            // Get raw JSON input
-            $data = json_decode(file_get_contents('php://input'), true);
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+            echo json_encode(['status' => false, 'message' => 'Invalid request method. Use POST.']);
+            return;
+        }
 
-            // Basic validation
-            if (empty($data['name']) || empty($data['email'])) {
-                echo json_encode(['message' => 'Name and Email are required']);
-                return;
-            }
+        $name = $this->input->post('name');
+        $email = $this->input->post('email');
 
-            // Image upload
-            $this->load->library('upload');
-            $base_url = base_url();
-            $image_name = 'Default.jpg'; // Default image in case no image is uploaded.
+        if (!$name || !$email || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            echo json_encode(['status' => false, 'message' => 'Valid name and email are required.']);
+            return;
+        }
 
-            // Configure upload settings
-            $config['upload_path'] = FCPATH . 'uploads/';
-            $config['allowed_types'] = 'jpg|jpeg|png|gif';
-            $config['max_size'] = 2048;
-            $config['encrypt_name'] = TRUE;
+        $image_path = base_url('uploads/Default.jpg');
 
-            // Check if the folder exists, if not, create it
+        // Handle Image Upload
+        if (!empty($_FILES['image']['name'])) {
+            $config = [
+                'upload_path' => FCPATH . 'uploads/',
+                'allowed_types' => 'jpg|jpeg|png|gif',
+                'max_size' => 2048,
+                'encrypt_name' => true
+            ];
+
             if (!is_dir($config['upload_path'])) {
                 mkdir($config['upload_path'], 0777, true);
             }
 
             $this->upload->initialize($config);
 
-            // Check if a file was uploaded
-            if (!empty($_FILES['image']['name'])) {
-                if (count($_FILES['image']['name']) != 1) {
-                    echo json_encode(['status' => false, 'message' => "Multiple images not allowed!"]);
-                    return;
-                }
-
-                // Prepare single image upload
-                $_FILES['single_image'] = [
-                    'name' => $_FILES['image']['name'][0],
-                    'type' => $_FILES['image']['type'][0],
-                    'tmp_name' => $_FILES['image']['tmp_name'][0],
-                    'error' => $_FILES['image']['error'][0],
-                    'size' => $_FILES['image']['size'][0]
-                ];
-
-                if (!$this->upload->do_upload('single_image')) {
-                    echo json_encode(['status' => false, 'message' => $this->upload->display_errors()]);
-                    return;
-                } else {
-                    $uploaded_data = $this->upload->data();
-                    $image_name = $uploaded_data['file_name']; // Save uploaded file name
-                }
+            if ($this->upload->do_upload('image')) {
+                $uploaded_data = $this->upload->data();
+                $image_path = base_url('uploads/' . $uploaded_data['file_name']);
+            } else {
+                echo json_encode(['status' => false, 'message' => $this->upload->display_errors()]);
+                return;
             }
-
-            // Prepare user data for insertion
-            $user_data = [
-                'name'  => $data['name'],
-                'email' => $data['email'],
-                'image' => $base_url . 'uploads/' . $image_name // Image path
-            ];
-
-            $result = $this->User_model->insert_user($user_data);
-            echo json_encode($result ? ['status' => true, 'message' => 'User created'] : ['status' => false, 'message' => 'Failed to create user']);
-        } else {
-            echo json_encode(['status' => false, 'message' => 'Invalid request method']);
         }
+
+        $user_data = [
+            'name' => $name,
+            'email' => $email,
+            'image' => $image_path
+        ];
+
+        $insert_id = $this->User_model->create_user($user_data);
+        echo json_encode(['status' => true, 'message' => 'User created successfully', 'user_id' => $insert_id]);
     }
 
-    // PUT: /api/update_user/{id}
     public function update_user($id)
     {
-        if ($_SERVER['REQUEST_METHOD'] === 'PUT') {
-            // Get raw JSON input
-            $data = json_decode(file_get_contents('php://input'), true);
+        if ($_SERVER['REQUEST_METHOD'] !== 'PUT' && $_SERVER['REQUEST_METHOD'] !== 'POST') {
+            echo json_encode(['status' => false, 'message' => 'Invalid request method. Use PUT or POST.']);
+            return;
+        }
 
-            // Validate if data exists
-            if (empty($data)) {
-                echo json_encode(['status' => false, 'message' => 'No data provided']);
-                return;
-            }
+        $existing_user = $this->User_model->get_users($id);
+        if (!$existing_user) {
+            echo json_encode(['status' => false, 'message' => 'User not found']);
+            return;
+        }
 
-            // Fetch current user data to keep old image if not updated
-            $user = $this->User_model->get_users($id);
-            if (!$user) {
-                echo json_encode(['status' => false, 'message' => 'User not found']);
-                return;
-            }
+        // Manually parse raw PUT data
+        parse_str(file_get_contents("php://input"), $_PUT);
+        $name = $_PUT['name'] ?? $existing_user->name;
+        $email = $_PUT['email'] ?? $existing_user->email;
 
-            // Default values
-            $image_name = $user->image; // Set the current image as the default
+        if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            echo json_encode(['status' => false, 'message' => 'Invalid email format']);
+            return;
+        }
 
-            // If a new image is uploaded, change it
-            if (!empty($_FILES['image']['name'])) {
-                if (count($_FILES['image']['name']) != 1) {
-                    echo json_encode(['status' => false, 'message' => "Multiple images not allowed!"]);
-                    return;
-                }
+        $image_path = $existing_user->image;
 
-                // Prepare single image upload
-                $_FILES['single_image'] = [
-                    'name' => $_FILES['image']['name'][0],
-                    'type' => $_FILES['image']['type'][0],
-                    'tmp_name' => $_FILES['image']['tmp_name'][0],
-                    'error' => $_FILES['image']['error'][0],
-                    'size' => $_FILES['image']['size'][0]
-                ];
-
-                $this->load->library('upload');
-                $config['upload_path'] = FCPATH . 'uploads/';
-                $config['allowed_types'] = 'jpg|jpeg|png|gif';
-                $config['max_size'] = 2048;
-                $config['encrypt_name'] = TRUE;
-
-                // Check if the folder exists, if not, create it
-                if (!is_dir($config['upload_path'])) {
-                    mkdir($config['upload_path'], 0777, true);
-                }
-
-                $this->upload->initialize($config);
-
-                // If upload is successful, update the image
-                if (!$this->upload->do_upload('single_image')) {
-                    echo json_encode(['status' => false, 'message' => $this->upload->display_errors()]);
-                    return;
-                } else {
-                    $uploaded_data = $this->upload->data();
-                    $image_name = $uploaded_data['file_name']; // Save new image name
-                }
-            }
-
-            // Prepare updated user data
-            $update_data = [
-                'name'  => $data['name'] ?? $user->name,
-                'email' => $data['email'] ?? $user->email,
-                'image' => base_url() . 'uploads/' . $image_name // Set the updated or existing image
+        if (!empty($_FILES['image']['name'])) {
+            $config = [
+                'upload_path' => FCPATH . 'uploads/',
+                'allowed_types' => 'jpg|jpeg|png|gif',
+                'max_size' => 2048,
+                'encrypt_name' => true
             ];
 
-            // Update user data in the database
-            $result = $this->User_model->update_user($id, $update_data);
-            echo json_encode($result ? ['status' => true, 'message' => 'User updated'] : ['status' => false, 'message' => 'Failed to update user']);
-        } else {
-            echo json_encode(['status' => false, 'message' => 'Invalid request method']);
+            $this->upload->initialize($config);
+
+            if ($this->upload->do_upload('image')) {
+                $uploaded_data = $this->upload->data();
+                $image_path = base_url('uploads/' . $uploaded_data['file_name']);
+            } else {
+                echo json_encode(['status' => false, 'message' => $this->upload->display_errors()]);
+                return;
+            }
         }
+
+        $update_data = [
+            'name' => $name,
+            'email' => $email,
+            'image' => $image_path
+        ];
+
+        $updated = $this->User_model->update_user($id, $update_data);
+        echo json_encode($updated ? ['status' => true, 'message' => 'User updated successfully'] : ['status' => false, 'message' => 'Failed to update user']);
     }
 
-    // DELETE: /api/delete_user/{id}
     public function delete_user($id)
     {
-        if ($_SERVER['REQUEST_METHOD'] === 'DELETE') {
-            $result = $this->User_model->delete_user($id);
-            echo json_encode($result ? ['status' => true, 'message' => 'User deleted'] : ['status' => false, 'message' => 'Failed to delete user']);
-        } else {
-            echo json_encode(['status' => false, 'message' => 'Invalid request method']);
+        if ($_SERVER['REQUEST_METHOD'] !== 'DELETE') {
+            echo json_encode(['status' => false, 'message' => 'Invalid request method. Use DELETE.']);
+            return;
         }
+
+        $user = $this->User_model->get_users($id);
+        if (!$user) {
+            echo json_encode(['status' => false, 'message' => 'User not found']);
+            return;
+        }
+
+        $deleted = $this->User_model->delete_user($id);
+        echo json_encode($deleted ? ['status' => true, 'message' => 'User deleted successfully'] : ['status' => false, 'message' => 'Failed to delete user']);
     }
 }

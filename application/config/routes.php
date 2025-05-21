@@ -1,5 +1,5 @@
 <?php
-defined('BASEPATH') OR exit('No direct script access allowed');
+defined('BASEPATH') or exit('No direct script access allowed');
 
 /*
 | -------------------------------------------------------------------------
@@ -52,3 +52,20 @@ defined('BASEPATH') OR exit('No direct script access allowed');
 $route['default_controller'] = 'welcome';
 $route['404_override'] = '';
 $route['translate_uri_dashes'] = FALSE;
+
+// Route to get all users via GET: /api/users
+$route['api/users']['GET'] = 'api/users';
+
+// Route to get a specific user by ID via GET: /api/users/5
+$route['api/users/(:num)']['GET'] = 'api/users/$1';
+
+// Route to create a new user via POST: /api/create_user
+$route['api/create_user']['POST'] = 'api/create_user';
+
+// Route to update an existing user by ID via POST: /api/update_user/5
+// (Note: using POST instead of PUT for easier browser/form testing)
+$route['api/update_user/(:num)']['POST'] = 'api/update_user/$1';
+
+// Route to delete a user by ID via DELETE: /api/delete_user/5
+$route['api/delete_user/(:num)']['DELETE'] = 'api/delete_user/$1';
+
